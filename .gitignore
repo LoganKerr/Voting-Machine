@@ -1,0 +1,6 @@
+.DS_store
+bin/
+lib/
+pyvenv.cfg
+voting_machine/__pycache__
+voting_machine/site.db
