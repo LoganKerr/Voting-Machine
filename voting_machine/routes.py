@@ -1,8 +1,11 @@
-from flask import render_template, request, redirect, url_for
+from flask import render_template, request, redirect, url_for, jsonify
 from voting_machine import app, db
-from voting_machine.models import Vote
+from voting_machine.models import Vote, Fingerprint
 from voting_machine.forms import VoteForm
 import requests
+import secrets
+from collections import defaultdict
+import json
 
 @app.route("/")
 def home():
@@ -18,7 +21,47 @@ def vote():
 	election, candidates = get_election(election_id)
 	form = VoteForm()
 	form.vote.choices = [(candidate['id'], candidate['email']) for candidate in candidates]
-	return render_template('vote.html', form=form, election=election, candidates=candidates)
+	if (request.form.get("votes")):
+		votes = json.loads(request.form.get("votes"))
+		#print(votes)
+		#vote_value = 0
+		#vote_values = {}
+		f = secrets.token_hex(32)
+		fingerprint = Fingerprint(voter_id=voter_id, fingerprint=f)
+		db.session.add(fingerprint)
+		db.session.flush()
+		db.session.refresh(fingerprint)
+
+		for vote in votes:
+			vote_inst = Vote(fingerprint_id=fingerprint.id, election_id=election_id, candidate_id=int(vote['id']), ciphertext=vote['ciphertext'], nonce=vote['nonce'])
+			db.session.add(vote_inst)
+
+		#for candidate in candidates:
+		#	if int(candidate['id']) == int(vote):
+		#		vote_value = 1
+		#	else:
+		#		vote_value = 0
+		#	vote_values[candidate['id']] = {'candidate': candidate['email'], 'value': vote_value}
+		#	vote_inst = Vote(fingerprint_id=fingerprint.id, election_id=election_id, candidate_id=candidate['id'], ciphertext=vote_value, nonce=0)
+		#	db.session.add(vote_inst)
+		db.session.commit()
+		tell_voter_voted(voter_id=voter_id, authentication_token=authentication_token)
+		return render_template('vote_success.html', fingerprint=fingerprint, votes=votes, candidates=candidates, election_id=election_id)
+	else:
+		return render_template('vote.html', form=form, election=election, candidates=candidates, authentication_token=authentication_token, voter_id=voter_id, election_id=election_id)
+
+@app.route("/get_votes/", methods=['GET', 'POST'])
+def get_votes():
+	data_dict = {'nonce_product': defaultdict(lambda: 1), 'votes': defaultdict(dict)}
+	if request.remote_addr != "127.0.0.1":
+		return jsonify({})
+	election_id = int(request.args.get("election_id"))
+	votes = db.session.query(Vote, Fingerprint).filter_by(election_id=election_id).join(Fingerprint, Vote.fingerprint_id == Fingerprint.id).all()
+	for vote in votes:
+		data_dict['nonce_product'][vote.Vote.candidate_id] *= int(vote.Vote.nonce)
+		data_dict['votes'][vote.Fingerprint.fingerprint][vote.Vote.candidate_id] = vote.Vote.ciphertext
+	return jsonify(data_dict)
+
 
 def voter_is_valid(authentication_token, election_id, voter_id):
 	response = 0
@@ -31,12 +74,21 @@ def voter_is_valid(authentication_token, election_id, voter_id):
 		print(e)
 	return status
 
+def tell_voter_voted(voter_id, authentication_token):
+	status = False
+	try:
+		response = requests.get('http://localhost:5000/voter_voted/?voter_id='+str(voter_id)+"&authentication_token="+str(authentication_token))
+		data = response.json()
+		status = data['status']
+	except requests.exceptions.RequestException as e:
+		print(e)
+	return status
+
 def get_election(election_id):
 	response = 0
 	try:
 		response = requests.get('http://localhost:5000/get_election/?election='+str(election_id))
 		data = response.json()
-		print(data)
 	except requests.exceptions.RequestException as e:
 		print(e)
 	return data['election'], data['candidates']

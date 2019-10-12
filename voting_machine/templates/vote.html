@@ -2,10 +2,19 @@
 
 {% block title %}Vote{% endblock title %}
 
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/paillier.js') }}"></script>
+{%endblock scripts%}
+
 {% block content %}
 	<div>
-		<form method="POST", action="">
+		<form id="form" method="POST", action="">
 			{{ form.hidden_tag() }}
+			<input type="hidden" id="public_key" name="public_key" value='{{ election['pub_key'] }}'/>
+			<input type="hidden" id="votes" name="votes" value="" />
+			<input type="hidden" name="authentication_token" value='{{ authentication_token }}'/>
+			<input type="hidden" name="voter" value='{{ voter_id }}'/>
+	  		<input type="hidden" name="election" value='{{ election_id }}'/>
 			<fieldset class="form-group">
 				<legend class="border-bottom mb-4">{{ election['title'] }}</legend>
 				<div class="form-group">
@@ -19,8 +28,51 @@
 				</div>
 			</fieldset>
 			<div class="form-group">
-				{{ form.submit(class="btn btn-outline-info") }}
+				<button type="button" class="btn btn-outline-info" onclick=castVote()>Vote</button>
 			</div>
 		</form>
 	</div>
+<script>
+function castVote()
+{
+	numBits = 128;
+	n = new BigInteger(document.getElementById("public_key").value);
+	pub = new paillier.publicKey(numBits, n);
+
+	var radios = document.getElementsByName('vote');
+	var votes = [];
+
+	candidateSelected = false;
+	for (var i = 0, length = radios.length; i < length; i++)
+	{
+		if (radios[i].checked)
+		{
+			candidateSelected = true;
+		}
+ 	}
+
+ 	if (candidateSelected)
+ 	{
+		for (var i = 0, length = radios.length; i < length; i++)
+		{
+			value = 0;
+			if (radios[i].checked)
+			{
+				value = 1;
+				radios[i].checked = false;
+			}
+			encVote = pub.encrypt(nbv(value));
+			votes.push(
+			{
+				id: radios[i].value,
+				ciphertext: encVote.enc.toString(),
+				nonce: encVote.nonce.toString(),
+			});
+	 	}
+	 	json_votes = JSON.stringify(votes);
+	 	document.getElementById("votes").value = json_votes;
+	 	document.getElementById("form").submit();
+	}
+}
+</script>
 {% endblock content %}
