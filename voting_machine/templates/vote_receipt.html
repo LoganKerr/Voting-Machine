@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+</head>
+<body>
+<div>
+	<p>Vote was received</p>
+	<p>A ciphertext has been generated for each candidate. Only one of which contains your vote</p>
+	<p>Please save this document to validate whether your vote counts at the end of the election</p>
+	<p>Fingerprint: {{ fingerprint.fingerprint }}</p>
+	<p>Votes:</p>
+	<ul>
+		{% for vote in votes %}
+			{% for candidate in candidates %}
+				{% if candidate['id']|int == vote['id']|int %}
+					<li style="word-wrap: break-word;min-width: 850px;max-width: 850px;">
+						{{ candidate['email'] }} : {{ vote['ciphertext'] }}
+					</li>
+				{% endif %}
+			{% endfor %}
+		{% endfor %}
+	</ul>
+	<a href="http://localhost:5000/election/?id={{ election_id }}">Return to Central Server</a>
+</div>
+</body>
+</html>

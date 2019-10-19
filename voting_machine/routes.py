@@ -1,11 +1,12 @@
-from flask import render_template, request, redirect, url_for, jsonify
+from flask import render_template, request, redirect, url_for, jsonify, make_response
 from voting_machine import app, db
-from voting_machine.models import Vote, Fingerprint
+from voting_machine.models import Vote, Fingerprint, Nonce
 from voting_machine.forms import VoteForm
 import requests
 import secrets
 from collections import defaultdict
 import json
+import pdfkit
 
 @app.route("/")
 def home():
@@ -33,8 +34,14 @@ def vote():
 		db.session.refresh(fingerprint)
 
 		for vote in votes:
-			vote_inst = Vote(fingerprint_id=fingerprint.id, election_id=election_id, candidate_id=int(vote['id']), ciphertext=vote['ciphertext'], nonce=vote['nonce'])
+			candidate_id = int(vote['id'])
+			vote_inst = Vote(fingerprint_id=fingerprint.id, election_id=election_id, candidate_id=candidate_id, ciphertext=vote['ciphertext'])
+			nonce_inst = Nonce.query.filter_by(election_id=election_id, candidate_id=candidate_id).first()
+			if (nonce_inst == None):
+				nonce_inst = Nonce(election_id=election_id, candidate_id=candidate_id, nonce="1")
+			nonce_inst.nonce = str(int(nonce_inst.nonce) * int(vote['nonce']))
 			db.session.add(vote_inst)
+			db.session.add(nonce_inst)
 
 		#for candidate in candidates:
 		#	if int(candidate['id']) == int(vote):
@@ -46,7 +53,14 @@ def vote():
 		#	db.session.add(vote_inst)
 		db.session.commit()
 		tell_voter_voted(voter_id=voter_id, authentication_token=authentication_token)
-		return render_template('vote_success.html', fingerprint=fingerprint, votes=votes, candidates=candidates, election_id=election_id)
+
+		rendered = render_template('vote_receipt.html', fingerprint=fingerprint, votes=votes, candidates=candidates, election_id=election_id)
+		pdf = pdfkit.from_string(rendered, False)
+		response = make_response(pdf)
+		response.headers['Content-Type'] = 'application/pdf'
+		response.headers['Content-Disposition'] = 'inline; filename='+str(election['title'])+' - Receipt.pdf'
+		return response;
+		#return render_template('vote_success.html', fingerprint=fingerprint, votes=votes, candidates=candidates, election_id=election_id)
 	else:
 		return render_template('vote.html', form=form, election=election, candidates=candidates, authentication_token=authentication_token, voter_id=voter_id, election_id=election_id)
 
@@ -57,9 +71,11 @@ def get_votes():
 		return jsonify({})
 	election_id = int(request.args.get("election_id"))
 	votes = db.session.query(Vote, Fingerprint).filter_by(election_id=election_id).join(Fingerprint, Vote.fingerprint_id == Fingerprint.id).all()
+	nonces = Nonce.query.filter_by(election_id=election_id).all()
 	for vote in votes:
-		data_dict['nonce_product'][vote.Vote.candidate_id] *= int(vote.Vote.nonce)
 		data_dict['votes'][vote.Fingerprint.fingerprint][vote.Vote.candidate_id] = vote.Vote.ciphertext
+	for nonce in nonces:
+		data_dict['nonce_product'][nonce.candidate_id] = nonce.nonce
 	return jsonify(data_dict)
 
 
