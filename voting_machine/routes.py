@@ -1,6 +1,6 @@
 from flask import render_template, request, redirect, url_for, jsonify, make_response
 from voting_machine import app, db
-from voting_machine.models import Vote, Fingerprint, Nonce
+from voting_machine.models import Vote, Fingerprint
 from voting_machine.forms import VoteForm
 import requests
 import secrets
@@ -36,12 +36,7 @@ def vote():
 		for vote in votes:
 			candidate_id = int(vote['id'])
 			vote_inst = Vote(fingerprint_id=fingerprint.id, election_id=election_id, candidate_id=candidate_id, ciphertext=vote['ciphertext'])
-			nonce_inst = Nonce.query.filter_by(election_id=election_id, candidate_id=candidate_id).first()
-			if (nonce_inst == None):
-				nonce_inst = Nonce(election_id=election_id, candidate_id=candidate_id, nonce="1")
-			nonce_inst.nonce = str(int(nonce_inst.nonce) * int(vote['nonce']))
 			db.session.add(vote_inst)
-			db.session.add(nonce_inst)
 
 		#for candidate in candidates:
 		#	if int(candidate['id']) == int(vote):
@@ -66,16 +61,13 @@ def vote():
 
 @app.route("/get_votes/", methods=['GET', 'POST'])
 def get_votes():
-	data_dict = {'nonce_product': defaultdict(lambda: 1), 'votes': defaultdict(dict)}
+	data_dict = {'votes': defaultdict(dict)}
 	if request.remote_addr != "127.0.0.1":
 		return jsonify({})
 	election_id = int(request.args.get("election_id"))
 	votes = db.session.query(Vote, Fingerprint).filter_by(election_id=election_id).join(Fingerprint, Vote.fingerprint_id == Fingerprint.id).all()
-	nonces = Nonce.query.filter_by(election_id=election_id).all()
 	for vote in votes:
 		data_dict['votes'][vote.Fingerprint.fingerprint][vote.Vote.candidate_id] = vote.Vote.ciphertext
-	for nonce in nonces:
-		data_dict['nonce_product'][nonce.candidate_id] = nonce.nonce
 	return jsonify(data_dict)
 
 

@@ -17,6 +17,7 @@
 	  		<input type="hidden" name="election" value='{{ election_id }}'/>
 			<fieldset class="form-group">
 				<legend class="border-bottom mb-4">{{ election['title'] }}</legend>
+				<p>*Votes are encrypted locally before being transferred to the voting machine</p>
 				<div class="form-group">
 					{% for candidate in form.vote %}
 					    <tr>
@@ -66,8 +67,8 @@ function castVote()
 			{
 				id: radios[i].value,
 				ciphertext: encVote.enc.toString(),
-				nonce: encVote.nonce.toString(),
 			});
+			console.log(encVote.nonce.toString())
 	 	}
 	 	json_votes = JSON.stringify(votes);
 	 	document.getElementById("votes").value = json_votes;

@@ -18,12 +18,3 @@ class Vote(db.Model):
 
 	def __repr__(self):
 		return f"Vote:('{self.election_id}','{self.fingerprint_id}', '{self.candidate_id}', '{self.ciphertext}')"
-
-class Nonce(db.Model):
-	id = db.Column(db.Integer, primary_key=True)
-	election_id = db.Column(db.Integer, nullable=False)
-	candidate_id = db.Column(db.Integer, nullable=False)
-	nonce = db.Column(db.String(2048), nullable=False)
-
-	def __repr__(self):
-		return f"Nonce:('{self.election_id}','{self.candidate_id}', '{self.nonce}')"
