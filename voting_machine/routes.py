@@ -1,4 +1,4 @@
-from flask import render_template, request, redirect, url_for, jsonify, make_response
+from flask import render_template, request, redirect, url_for, jsonify, make_response, flash
 from voting_machine import app, db
 from voting_machine.models import Vote, Fingerprint
 from voting_machine.forms import VoteForm
@@ -7,6 +7,7 @@ import secrets
 from collections import defaultdict
 import json
 import pdfkit
+import gmpy2
 
 @app.route("/")
 def home():
@@ -23,7 +24,9 @@ def vote():
 	form = VoteForm()
 	form.vote.choices = [(candidate['id'], candidate['email']) for candidate in candidates]
 	if (request.form.get("votes")):
-		votes = json.loads(request.form.get("votes"))
+		votes_data = json.loads(request.form.get("votes"))
+		votes = votes_data["votes"]
+		tally_proof = votes_data["tally_proof"]
 		#print(votes)
 		#vote_value = 0
 		#vote_values = {}
@@ -33,10 +36,25 @@ def vote():
 		db.session.flush()
 		db.session.refresh(fingerprint)
 
+		ciphertext_ax = 1;
+		n = int(election['pub_key'])
+		n_sq = n * n
+
+		vote_error = False
 		for vote in votes:
 			candidate_id = int(vote['id'])
 			vote_inst = Vote(fingerprint_id=fingerprint.id, election_id=election_id, candidate_id=candidate_id, ciphertext=vote['ciphertext'])
-			db.session.add(vote_inst)
+			if (verify_vote(n, vote['proof'], int(vote['ciphertext']))):
+				db.session.add(vote_inst)
+				ciphertext_ax = ciphertext_ax * int(vote['ciphertext']) % n_sq
+			else:
+				vote_error = True
+				break
+
+		# Calculate tally is in range [0, 1]
+		if not vote_error:
+			if not verify_vote(n, tally_proof, int(ciphertext_ax)):
+				vote_error = True
 
 		#for candidate in candidates:
 		#	if int(candidate['id']) == int(vote):
@@ -46,18 +64,57 @@ def vote():
 		#	vote_values[candidate['id']] = {'candidate': candidate['email'], 'value': vote_value}
 		#	vote_inst = Vote(fingerprint_id=fingerprint.id, election_id=election_id, candidate_id=candidate['id'], ciphertext=vote_value, nonce=0)
 		#	db.session.add(vote_inst)
-		db.session.commit()
-		tell_voter_voted(voter_id=voter_id, authentication_token=authentication_token)
+		if (not vote_error):
+			db.session.commit()
+			tell_voter_voted(voter_id=voter_id, authentication_token=authentication_token)
 
-		rendered = render_template('vote_receipt.html', fingerprint=fingerprint, votes=votes, candidates=candidates, election_id=election_id)
-		pdf = pdfkit.from_string(rendered, False)
-		response = make_response(pdf)
-		response.headers['Content-Type'] = 'application/pdf'
-		response.headers['Content-Disposition'] = 'inline; filename='+str(election['title'])+' - Receipt.pdf'
-		return response;
+			rendered = render_template('vote_receipt.html', fingerprint=fingerprint, votes=votes, candidates=candidates, election_id=election_id)
+			pdf = pdfkit.from_string(rendered, False)
+			response = make_response(pdf)
+			response.headers['Content-Type'] = 'application/pdf'
+			response.headers['Content-Disposition'] = 'inline; filename='+str(election['title'])+' - Receipt.pdf'
+			return response;
+		else:
+			flash("Vote is not valid, please try again", "danger")
+			return render_template('vote.html', form=form, election=election, candidates=candidates, authentication_token=authentication_token, voter_id=voter_id, election_id=election_id)
 		#return render_template('vote_success.html', fingerprint=fingerprint, votes=votes, candidates=candidates, election_id=election_id)
 	else:
 		return render_template('vote.html', form=form, election=election, candidates=candidates, authentication_token=authentication_token, voter_id=voter_id, election_id=election_id)
+
+def getInverse(m, n):
+	return gmpy2.invert(m, n);
+
+def verify_vote(n, proof, C):
+	g = n + 1
+	c1 = int(proof['c1'])
+	c2 = int(proof['c2'])
+	t1num = int(proof['t1num'])
+	t1den = int(proof['t1den'])
+	t2num = int(proof['t2num'])
+	t2den = int(proof['t2den'])
+	s1 = int(proof['s1'])
+	s2 = int(proof['s2'])
+
+	n_sq = n * n
+	c_g = (C * getInverse(g, n_sq)) % n_sq
+
+	if (t2den == 1):
+		s2_n = pow(s2, n, n_sq)
+		s2_n_calc = ((pow(c2, n, n_sq) * pow(C, (c2 * n), n_sq) % n_sq) * t2num) % n_sq
+	else:
+		s2_n = float(pow(s2, n, n_sq))
+		s2_n_calc = ((pow(c2, n, n_sq) * pow(C, (c2 * n), n_sq) % n_sq) * t2num / t2den) % n_sq
+
+	if t1den == 1:
+		s1_n = pow(s1, n, n_sq)
+		s1_n_calc = (((pow(c1, n, n_sq) * pow(c_g, (c1 * n), n_sq)) % n_sq) * t1num) % n_sq
+	else:
+		s1_n = float(pow(s1, n, n_sq))
+		s1_n_calc = (((pow(c1, n, n_sq) * pow(c_g, (c1 * n), n_sq)) % n_sq) * t1num / t1den) % n_sq
+
+	if (round(s1_n) == round(s1_n_calc) and round(s2_n) == round(s2_n_calc)):
+		return True
+	return False
 
 @app.route("/get_votes/", methods=['GET', 'POST'])
 def get_votes():

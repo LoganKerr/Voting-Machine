@@ -4,6 +4,8 @@
 
 {% block scripts %}
 <script src="{{ url_for('static', filename='js/paillier.js') }}"></script>
+<script src="{{ url_for('static', filename='js/md5.js') }}"></script>
+<script src="{{ url_for('static', filename='js/big.js') }}"></script>
 {%endblock scripts%}
 
 {% block content %}
@@ -43,6 +45,11 @@ function castVote()
 	var radios = document.getElementsByName('vote');
 	var votes = [];
 
+	n_sq = pub.n.square();
+
+	ciphertext_ax = null;
+	r_ax = null;
+
 	candidateSelected = false;
 	for (var i = 0, length = radios.length; i < length; i++)
 	{
@@ -53,27 +60,163 @@ function castVote()
  	}
 
  	if (candidateSelected)
- 	{
-		for (var i = 0, length = radios.length; i < length; i++)
-		{
-			value = 0;
-			if (radios[i].checked)
+ 	{	
+ 		var i = 0;
+ 		len = radios.length;
+ 		ciphertext_ax = BigInteger.ONE;
+ 		r_ax = BigInteger.ONE;
+ 		while ((i == 0 && (ciphertext_ax.compareTo(BigInteger.ONE) == 0)) || ciphertext_ax.compareTo(BigInteger.ZERO) <= 0)
+ 		{
+			for (i = 0, length = radios.length; i < length; i++)
 			{
-				value = 1;
-				radios[i].checked = false;
-			}
-			encVote = pub.encrypt(nbv(value));
-			votes.push(
-			{
-				id: radios[i].value,
-				ciphertext: encVote.enc.toString(),
-			});
-			console.log(encVote.nonce.toString())
-	 	}
-	 	json_votes = JSON.stringify(votes);
+				value = 0;
+				if (radios[i].checked)
+				{
+					value = 1;
+					radios[i].checked = false;
+				}
+				encVote = pub.encrypt(nbv(value));
+				ciphertext_ax = ciphertext_ax.multiply(encVote.enc).mod(n_sq);
+				r_ax = r_ax.multiply(encVote.nonce).mod(n_sq);
+				votes.push(
+				{
+					id: radios[i].value,
+					ciphertext: encVote.enc.toString(),
+					proof: generateProof(pub, value, encVote.nonce, encVote.enc)
+				});
+		 	}
+		}
+	 	tally_proof = generateProof(pub, 1, r_ax, ciphertext_ax);
+	 	json_votes = JSON.stringify({"votes":votes, "tally_proof":tally_proof});
 	 	document.getElementById("votes").value = json_votes;
 	 	document.getElementById("form").submit();
 	}
+}
+
+
+var modInverse = function(a, b) {
+	c = a.mod(b);
+    for (x = new BigInteger('1'); x.compareTo(b) < 0; x = x.add(BigInteger.ONE)) {
+    	if (c.multiply(x).mod(b).compareTo(BigInteger.ONE) == 0) {
+            return x;
+        }
+    }
+}
+
+function hexToDec(s) {
+    var i, j, digits = [0], carry;
+    for (i = 0; i < s.length; i += 1) {
+        carry = parseInt(s.charAt(i), 16);
+        for (j = 0; j < digits.length; j += 1) {
+            digits[j] = digits[j] * 16 + carry;
+            carry = digits[j] / 10 | 0;
+            digits[j] %= 10;
+        }
+        while (carry > 0) {
+            digits.push(carry % 10);
+            carry = carry / 10 | 0;
+        }
+    }
+    return digits.reverse().join('');
+}
+
+function generateProof(pub, x, r, cipher)
+{
+	n = pub.n;
+	n_sq = n.square();
+	g = n.add(BigInteger.ONE);
+	r_n = r.modPow(n, n_sq);
+
+	if (x == 0)
+	{
+		c2 = BigInteger.ZERO;
+		t1den = BigInteger.ZERO;
+		t2den = BigInteger.ZERO;
+		while (c2.compareTo(BigInteger.ZERO) <= 0 || t1den.compareTo(BigInteger.ZERO) == 0 || t2den.compareTo(BigInteger.ZERO) == 0)
+		{
+			s1 = BigInteger.ZERO;
+			c1 = BigInteger.ZERO;
+			while (s1.compareTo(BigInteger.ZERO) == 0 || c1.compareTo(BigInteger.ZERO) == 0)
+			{
+				s1 = pub.getRN().mod(n_sq);
+				c1 = pub.getRN().mod(n_sq);
+			}
+			r_n = r.modPow(n, n_sq);
+
+			s1_n = s1.modPow(n, n_sq);
+			t1num = s1_n;
+			t1den = c1.modPow(n, n_sq).multiply(r_n.modPow(c1.multiply(n), n_sq)).mod(n_sq);
+
+			c = new BigInteger(hexToDec(md5(n.add(t1num.add(t1den))))).mod(n_sq);
+			c2 = c.subtract(c1);
+			r2 = BigInteger.ZERO;
+			while (r2.compareTo(BigInteger.ZERO) == 0)
+			{
+				r2 = pub.getRN().mod(n_sq);
+			}
+
+			s2 = r2.multiply(c2).mod(n_sq).multiply(r_n.modPow(c2, n_sq)).mod(n_sq);
+
+			s2_n = s2.modPow(n, n_sq);
+			t2num = (r2.modPow(n, n_sq));
+			t2den = BigInteger.ONE;
+		}
+	}
+	else if (x == 1)
+	{
+		c1 = BigInteger.ZERO;
+		t1den = BigInteger.ZERO;
+		t2den = BigInteger.ZERO;
+		while (c1.compareTo(BigInteger.ZERO) <= 0 || t1den.compareTo(BigInteger.ZERO) == 0 || t2den.compareTo(BigInteger.ZERO) == 0)
+		{
+			s2 = BigInteger.ZERO;
+			c2 = BigInteger.ZERO;
+			while (s2.compareTo(BigInteger.ZERO) == 0 || c2.compareTo(BigInteger.ZERO) == 0)
+			{
+				s2 = pub.getRN().mod(n_sq);
+				c2 = pub.getRN().mod(n_sq);
+			}
+
+			s2_n = s2.modPow(n, n_sq);
+			t2num = s2_n;
+			t2den = c2.modPow(n, n_sq).multiply(cipher.modPow(c2.multiply(n), n_sq)).mod(n_sq);
+
+			c = new BigInteger(hexToDec(md5(n.add(t2num.add(t2den))))).mod(n_sq);
+			c1 = c.subtract(c2);
+			r1 = BigInteger.ZERO;
+			while (r1.compareTo(BigInteger.ZERO) == 0)
+			{
+				r1 = pub.getRN().mod(n_sq);
+			}
+			r_n = r.modPow(n, n_sq);
+
+			s1 = r1.multiply(c1).mod(n_sq).multiply(r_n.modPow(c1, n_sq)).mod(n_sq);
+
+			s1_n = s1.modPow(n, n_sq);
+			t1num = (r1.modPow(n, n_sq));
+			t1den = BigInteger.ONE;
+		}
+	}
+
+	//s2_n_calc = c2.modPow(n, n_sq).multiply(cipher.modPow(c2.multiply(n), n_sq)).mod(n_sq).multiply(t2num).divide(t2den).mod(n_sq);
+
+	//c_g = r_n
+
+	//s1_n_calc = c1.modPow(n, n_sq).multiply(c_g.modPow(c1.multiply(n), n_sq)).mod(n_sq).multiply(t1num).divide(t1den).mod(n_sq);
+
+
+	proof = {
+		c1: c1.toString(),
+		c2: c2.toString(),
+		t1num: t1num.toString(),
+		t1den: t1den.toString(),
+		t2num: t2num.toString(),
+		t2den: t2den.toString(),
+		s1: s1.toString(),
+		s2: s2.toString()
+	};
+
+	return proof;
 }
 </script>
 {% endblock content %}
