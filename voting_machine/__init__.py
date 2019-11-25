@@ -8,5 +8,5 @@ app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///site.db'
 
 db = SQLAlchemy(app)
 
-from voting_machine.models import Vote, Fingerprint
+from voting_machine.models import Vote
 from voting_machine import routes

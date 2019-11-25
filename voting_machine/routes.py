@@ -1,6 +1,6 @@
 from flask import render_template, request, redirect, url_for, jsonify, make_response, flash
 from voting_machine import app, db
-from voting_machine.models import Vote, Fingerprint
+from voting_machine.models import Vote
 from voting_machine.forms import VoteForm
 import requests
 import secrets
@@ -31,10 +31,10 @@ def vote():
 		#vote_value = 0
 		#vote_values = {}
 		f = secrets.token_hex(32)
-		fingerprint = Fingerprint(voter_id=voter_id, fingerprint=f)
-		db.session.add(fingerprint)
-		db.session.flush()
-		db.session.refresh(fingerprint)
+		#fingerprint = Fingerprint(voter_id=voter_id, fingerprint=f)
+		#db.session.add(fingerprint)
+		#db.session.flush()
+		#db.session.refresh(fingerprint)
 
 		ciphertext_ax = 1;
 		n = int(election['pub_key'])
@@ -43,7 +43,7 @@ def vote():
 		vote_error = False
 		for vote in votes:
 			candidate_id = int(vote['id'])
-			vote_inst = Vote(fingerprint_id=fingerprint.id, election_id=election_id, candidate_id=candidate_id, ciphertext=vote['ciphertext'])
+			vote_inst = Vote(fingerprint=f, election_id=election_id, candidate_id=candidate_id, ciphertext=vote['ciphertext'])
 			if (verify_vote(n, vote['proof'], int(vote['ciphertext']))):
 				db.session.add(vote_inst)
 				ciphertext_ax = ciphertext_ax * int(vote['ciphertext']) % n_sq
@@ -68,7 +68,7 @@ def vote():
 			db.session.commit()
 			tell_voter_voted(voter_id=voter_id, authentication_token=authentication_token)
 
-			rendered = render_template('vote_receipt.html', fingerprint=fingerprint, votes=votes, candidates=candidates, election_id=election_id)
+			rendered = render_template('vote_receipt.html', fingerprint=f, votes=votes, candidates=candidates, election_id=election_id)
 			pdf = pdfkit.from_string(rendered, False)
 			response = make_response(pdf)
 			response.headers['Content-Type'] = 'application/pdf'
@@ -122,9 +122,9 @@ def get_votes():
 	if request.remote_addr != "127.0.0.1":
 		return jsonify({})
 	election_id = int(request.args.get("election_id"))
-	votes = db.session.query(Vote, Fingerprint).filter_by(election_id=election_id).join(Fingerprint, Vote.fingerprint_id == Fingerprint.id).all()
+	votes = db.session.query(Vote).filter_by(election_id=election_id).all()
 	for vote in votes:
-		data_dict['votes'][vote.Fingerprint.fingerprint][vote.Vote.candidate_id] = vote.Vote.ciphertext
+		data_dict['votes'][vote.fingerprint][vote.candidate_id] = vote.ciphertext
 	return jsonify(data_dict)
 
 
